@@ -26,6 +26,9 @@ Usage::
     python scripts/regression/superset_regression.py --preset security
     python scripts/regression/superset_regression.py --suites python-lint python-unit
     python scripts/regression/superset_regression.py --preset backend --json report.json
+
+Test suites are capped at ``--max-tests`` (10 by default) so a report stays fast
+enough to run on every pull request; pass ``--max-tests 0`` for a full run.
 """
 
 from __future__ import annotations
@@ -57,6 +60,10 @@ class Suite:
     #: Output fragments meaning "the tool itself could not run here", which must be
     #: reported as NOT RUN rather than as a regression.
     tool_error_markers: tuple[str, ...] = ()
+    #: Command listing the suite's selectable tests, one id per line. Set only for
+    #: test runners, whose full run is far slower than a per-pull-request report can
+    #: afford; the listed ids are sampled and appended to ``command`` to cap the run.
+    collect_command: tuple[str, ...] = ()
 
 
 @dataclass
@@ -67,6 +74,9 @@ class SuiteResult:
     duration_seconds: float
     reason: str = ""
     tail: list[str] = field(default_factory=list)
+    #: How the run was narrowed, e.g. "first 10 of 4321 tests". Empty when the whole
+    #: suite ran.
+    scope: str = ""
 
 
 SUITES: dict[str, Suite] = {
@@ -87,6 +97,15 @@ SUITES: dict[str, Suite] = {
         [sys.executable, "-m", "pytest", "tests/unit_tests", "-q", "--no-header"],
         REPO_ROOT,
         "backend unit tests",
+        collect_command=(
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/unit_tests",
+            "--collect-only",
+            "-q",
+            "--no-header",
+        ),
     ),
     "python-audit": Suite(
         "python-audit",
@@ -124,6 +143,7 @@ SUITES: dict[str, Suite] = {
         ["npm", "run", "test", "--", "--silent", "--ci"],
         FRONTEND,
         "jest unit/component tests",
+        collect_command=("npm", "run", "test", "--", "--listTests", "--silent"),
     ),
 }
 
@@ -170,14 +190,51 @@ def _executable_missing(suite: Suite) -> str:
     return ""
 
 
-def run_suite(suite: Suite, timeout: int) -> SuiteResult:
+#: A selectable test: a pytest node id, or a jest test file path.
+_TEST_ID = re.compile(
+    r"^(?:\S+::\S+|\S*[\\/]\S*\.(?:test|spec)\.[jt]sx?)$",
+)
+
+
+def _selected_tests(suite: Suite, limit: int, timeout: int) -> tuple[list[str], str]:
+    """The first ``limit`` tests of a suite, plus a note describing the narrowing.
+
+    Full test runs dominate the report's wall time, so a capped run keeps the
+    report fast enough to be read on every pull request. Collection is best
+    effort: if it fails, the suite runs unnarrowed rather than not at all.
+    """
+    if limit <= 0 or not suite.collect_command:
+        return [], ""
+    try:
+        listed = subprocess.run(  # noqa: S603 - fixed command table, no shell
+            list(suite.collect_command),
+            cwd=suite.cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        return [], ""
+
+    ids = [line.strip() for line in listed.splitlines() if _TEST_ID.match(line.strip())]
+    if len(ids) <= limit:
+        return [], ""
+    unit = "test files" if suite.name.endswith("jest") else "tests"
+    return ids[:limit], f"first {limit} of {len(ids)} {unit}"
+
+
+def run_suite(suite: Suite, timeout: int, max_tests: int = 0) -> SuiteResult:
     if reason := _executable_missing(suite):
         return SuiteResult(suite, "not_run", "not run", 0.0, reason=reason)
+
+    selected, scope = _selected_tests(suite, max_tests, timeout)
+    command = [*suite.command, *selected]
 
     started = time.monotonic()
     try:
         completed = subprocess.run(  # noqa: S603 - fixed command table, no shell
-            suite.command,
+            command,
             cwd=suite.cwd,
             capture_output=True,
             text=True,
@@ -191,6 +248,7 @@ def run_suite(suite: Suite, timeout: int) -> SuiteResult:
             "timed out",
             time.monotonic() - started,
             reason=f"exceeded {timeout}s",
+            scope=scope,
         )
 
     duration = time.monotonic() - started
@@ -205,6 +263,7 @@ def run_suite(suite: Suite, timeout: int) -> SuiteResult:
             duration,
             reason=f"suite could not execute ({marker})",
             tail=output[-20:],
+            scope=scope,
         )
     return SuiteResult(
         suite,
@@ -212,6 +271,7 @@ def run_suite(suite: Suite, timeout: int) -> SuiteResult:
         _summarise(completed.stdout, completed.stderr, completed.returncode),
         duration,
         tail=output[-20:],
+        scope=scope,
     )
 
 
@@ -238,6 +298,7 @@ def render_report(
         detail = result.summary if result.outcome != "not_run" else result.reason
         lines.append(
             f"| `{' '.join(result.suite.command)}` "
+            f"{f'({result.scope}) ' if result.scope else ''}"
             f"| {icons[result.outcome]} — {detail} "
             f"| {result.duration_seconds:.1f}s |"
         )
@@ -315,6 +376,12 @@ def main() -> int:
         "--timeout", type=int, default=2400, help="per-suite timeout in seconds"
     )
     parser.add_argument(
+        "--max-tests",
+        type=int,
+        default=10,
+        help="cap test suites at this many tests (0 runs every test)",
+    )
+    parser.add_argument(
         "--json", dest="json_path", help="also write machine-readable results"
     )
     parser.add_argument(
@@ -325,7 +392,7 @@ def main() -> int:
     args = parser.parse_args()
 
     names = args.suites or PRESETS[args.preset or "security"]
-    results = [run_suite(SUITES[name], args.timeout) for name in names]
+    results = [run_suite(SUITES[name], args.timeout, args.max_tests) for name in names]
     report = render_report(
         results,
         issue=args.issue,
@@ -345,6 +412,7 @@ def main() -> int:
                             "name": r.suite.name,
                             "command": r.suite.command,
                             "outcome": r.outcome,
+                            "scope": r.scope,
                             "summary": r.summary,
                             "reason": r.reason,
                             "duration_seconds": round(r.duration_seconds, 1),
