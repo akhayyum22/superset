@@ -29,12 +29,12 @@ import {
   HeaderContainer,
   LabelsContainer,
 } from 'src/explore/components/controls/OptionControls';
+import type { Datasource } from 'src/explore/types';
+import type { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 import MetricDefinitionValue from './MetricDefinitionValue';
 import AdhocMetric, { dedupeAdhocMetricOptionName } from './AdhocMetric';
 import AdhocMetricPopoverTrigger from './AdhocMetricPopoverTrigger';
 import { savedMetricType } from './types';
-import type { Datasource } from 'src/explore/types';
-import type { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 
 type MetricColumn = { column_name: string; type: string };
 type MetricDefinitionOption = AdhocMetric | savedMetricType | string;
@@ -79,11 +79,16 @@ function coerceAdhocMetrics(
   if (!value) {
     return [];
   }
-  const values: MetricInput[] = Array.isArray(value) ? value : [value];
+  if (!Array.isArray(value)) {
+    if (isDictionaryForAdhocMetric(value)) {
+      return [new AdhocMetric(value)];
+    }
+    return [value];
+  }
   // Metrics are identified by optionName when editing; regenerate any that
   // collide so each keeps a unique identity (see dedupeAdhocMetricOptionName).
   const seenOptionNames = new Set<string>();
-  return values.map(val => {
+  return value.map(val => {
     if (isDictionaryForAdhocMetric(val)) {
       return dedupeAdhocMetricOptionName(new AdhocMetric(val), seenOptionNames);
     }
@@ -95,45 +100,31 @@ const emptySavedMetric = { metric_name: '', expression: '' };
 
 // TODO: use typeguards to distinguish saved metrics from adhoc metrics
 const getMetricsMatchingCurrentDataset = (
-  value: MetricInput | MetricInput[],
+  value: MetricInput | MetricInput[] | null | undefined,
   columns: MetricColumn[],
   savedMetrics: savedMetricType[],
-): MetricInput[] => {
-  const metrics: MetricInput[] = Array.isArray(value) ? value : [value];
-  return metrics.filter(metric => {
-    if (
-      typeof metric === 'string' ||
-      (typeof metric === 'object' &&
-        metric !== null &&
-        'metric_name' in metric &&
-        typeof metric.metric_name === 'string')
-    ) {
+): MetricInput[] =>
+  ensureIsArray<MetricInput>(value).filter(metric => {
+    const metricName =
+      typeof metric === 'object' && metric !== null && 'metric_name' in metric
+        ? metric.metric_name
+        : undefined;
+    if (typeof metric === 'string' || metricName) {
       return savedMetrics?.some(
         savedMetric =>
           savedMetric.metric_name === metric ||
-          (typeof metric !== 'string' &&
-            savedMetric.metric_name === metric.metric_name),
+          savedMetric.metric_name === metricName,
       );
     }
-    return (
-      'column' in metric &&
-      columns?.some(
-        column =>
-          !metric.column || metric.column.column_name === column.column_name,
-      )
+    const metricColumn =
+      typeof metric === 'object' && metric !== null && 'column' in metric
+        ? metric.column
+        : undefined;
+    return columns?.some(
+      column =>
+        !metricColumn || metricColumn.column_name === column.column_name,
     );
   });
-};
-
-function isMetricDefinitionOption(
-  option: MetricOption,
-): option is MetricDefinitionOption {
-  return (
-    typeof option === 'string' ||
-    option instanceof AdhocMetric ||
-    'expression' in option
-  );
-}
 
 export interface MetricsControlProps {
   name: string;
@@ -173,12 +164,14 @@ const MetricsControl = ({
       const optionValues = transformedOpts
         .map(option => {
           // pre-defined metric
-          if (
+          const metricName =
             typeof option === 'object' &&
             option !== null &&
             'metric_name' in option
-          ) {
-            return option.metric_name;
+              ? option.metric_name
+              : undefined;
+          if (metricName) {
+            return metricName;
           }
           return option;
         })
@@ -200,17 +193,19 @@ const MetricsControl = ({
   const onMetricEdit = useCallback(
     (changedMetric: Metric, oldMetric: Metric) => {
       const newValue = value.map(val => {
-        const isSameAdhocMetric =
-          typeof val === 'object' &&
-          val !== null &&
-          'optionName' in val &&
-          'optionName' in oldMetric &&
-          val.optionName === oldMetric.optionName;
+        const typedVal = val as Extract<MetricOption, object> & {
+          optionName?: string;
+        };
+        const typedOldMetric = oldMetric as Metric & {
+          optionName?: string;
+        };
         if (
           // compare saved metrics
           val === oldMetric.metric_name ||
           // compare adhoc metrics
-          isSameAdhocMetric
+          typeof typedVal.optionName !== 'undefined'
+            ? typedVal.optionName === typedOldMetric.optionName
+            : false
         ) {
           return changedMetric;
         }
@@ -316,31 +311,26 @@ const MetricsControl = ({
   );
 
   const valueRenderer = useCallback(
-    (option: MetricOption, index: number) => {
-      if (!isMetricDefinitionOption(option)) {
-        return null;
-      }
-      return (
-        <MetricDefinitionValue
-          key={index}
-          index={index}
-          option={option}
-          onMetricEdit={onMetricEdit}
-          onRemoveMetric={onRemoveMetric}
-          columns={columns}
-          datasource={datasource}
-          savedMetrics={savedMetrics}
-          savedMetricsOptions={getOptionsForSavedMetrics(
-            savedMetrics,
-            value,
-            value?.[index],
-          )}
-          onMoveLabel={moveLabel}
-          onDropLabel={onDropLabel}
-          multi={multi}
-        />
-      );
-    },
+    (option: MetricOption, index: number) => (
+      <MetricDefinitionValue
+        key={index}
+        index={index}
+        option={option}
+        onMetricEdit={onMetricEdit}
+        onRemoveMetric={onRemoveMetric}
+        columns={columns}
+        datasource={datasource}
+        savedMetrics={savedMetrics}
+        savedMetricsOptions={getOptionsForSavedMetrics(
+          savedMetrics,
+          value,
+          value?.[index],
+        )}
+        onMoveLabel={moveLabel}
+        onDropLabel={onDropLabel}
+        multi={multi}
+      />
+    ),
     [
       columns,
       datasource,
