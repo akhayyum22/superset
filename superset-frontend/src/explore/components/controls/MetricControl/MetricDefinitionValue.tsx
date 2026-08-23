@@ -21,6 +21,7 @@ import { Datasource } from 'src/explore/types';
 import { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 import AdhocMetricOption from './AdhocMetricOption';
 import AdhocMetric from './AdhocMetric';
+import type { ColumnType } from './columnType';
 import { savedMetricType as SavedMetricTypeDef } from './types';
 
 interface MetricDefinitionValueProps {
@@ -30,7 +31,7 @@ interface MetricDefinitionValueProps {
   onRemoveMetric?: (index: number) => void;
   onMoveLabel?: (dragIndex: number, hoverIndex: number) => void;
   onDropLabel?: () => void;
-  columns?: { column_name: string; type: string }[];
+  columns?: ColumnType[];
   savedMetrics?: SavedMetricTypeDef[];
   savedMetricsOptions?: SavedMetricTypeDef[];
   multi?: boolean;

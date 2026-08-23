@@ -24,13 +24,14 @@ import { Datasource } from 'src/explore/types';
 import { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 import AdhocMetric from './AdhocMetric';
 import AdhocMetricPopoverTrigger from './AdhocMetricPopoverTrigger';
+import type { ColumnType } from './columnType';
 import { savedMetricType as SavedMetricTypeDef } from './types';
 
 interface AdhocMetricOptionProps {
   adhocMetric: AdhocMetric;
   onMetricEdit: (newMetric: Metric, oldMetric: Metric) => void;
   onRemoveMetric?: (index: number) => void;
-  columns?: { column_name: string; type: string }[];
+  columns?: ColumnType[];
   savedMetricsOptions?: SavedMetricTypeDef[];
   savedMetric?: SavedMetricTypeDef | Record<string, never>;
   datasource?: Datasource & ISaveableDatasource;

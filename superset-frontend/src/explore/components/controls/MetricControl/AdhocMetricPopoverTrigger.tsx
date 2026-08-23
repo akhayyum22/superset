@@ -38,13 +38,14 @@ import AdhocMetricEditPopover, {
   SAVED_TAB_KEY,
 } from './AdhocMetricEditPopover';
 import AdhocMetric from './AdhocMetric';
+import type { ColumnType } from './columnType';
 import { savedMetricType } from './types';
 import ControlPopover from '../ControlPopover/ControlPopover';
 
 export type AdhocMetricPopoverTriggerProps = {
   adhocMetric: AdhocMetric;
   onMetricEdit(newMetric: Metric, oldMetric: Metric): void;
-  columns: { column_name: string; type: string }[];
+  columns: ColumnType[];
   savedMetricsOptions: savedMetricType[];
   savedMetric: savedMetricType | Record<string, never>;
   datasource: Datasource & ISaveableDatasource;

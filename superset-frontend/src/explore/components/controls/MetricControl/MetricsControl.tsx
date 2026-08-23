@@ -29,19 +29,15 @@ import {
   HeaderContainer,
   LabelsContainer,
 } from 'src/explore/components/controls/OptionControls';
-import type { Datasource } from 'src/explore/types';
-import type { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 import MetricDefinitionValue from './MetricDefinitionValue';
 import AdhocMetric, { dedupeAdhocMetricOptionName } from './AdhocMetric';
 import AdhocMetricPopoverTrigger from './AdhocMetricPopoverTrigger';
+import type { ColumnType } from './columnType';
 import { savedMetricType } from './types';
 
-type MetricColumn = { column_name: string; type: string };
 type MetricDefinitionOption = AdhocMetric | savedMetricType | string;
 type MetricOption = MetricDefinitionOption | Metric;
-type AdhocMetricDefinition = ConstructorParameters<typeof AdhocMetric>[0] & {
-  expressionType: string;
-};
+type AdhocMetricDefinition = ConstructorParameters<typeof AdhocMetric>[0];
 type MetricInput = MetricOption | AdhocMetricDefinition;
 
 function getOptionsForSavedMetrics(
@@ -101,7 +97,7 @@ const emptySavedMetric = { metric_name: '', expression: '' };
 // TODO: use typeguards to distinguish saved metrics from adhoc metrics
 const getMetricsMatchingCurrentDataset = (
   value: MetricInput | MetricInput[] | null | undefined,
-  columns: MetricColumn[],
+  columns: ColumnType[],
   savedMetrics: savedMetricType[],
 ): MetricInput[] =>
   ensureIsArray<MetricInput>(value).filter(metric => {
@@ -130,10 +126,12 @@ export interface MetricsControlProps {
   name: string;
   onChange: (value: unknown) => void;
   multi?: boolean;
-  value?: MetricInput | MetricInput[];
-  columns?: MetricColumn[];
+  value?: MetricInput | MetricInput[] | null;
+  columns?: ColumnType[];
   savedMetrics?: savedMetricType[];
-  datasource?: Datasource & ISaveableDatasource;
+  // TODO: The child contract Datasource & ISaveableDatasource cannot be satisfied by real callers without refactoring AdhocMetricPopoverTrigger and SaveDatasetModal prop contracts.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- real callers provide a looser datasource shape
+  datasource?: any;
   clearable?: boolean;
   isLoading?: boolean;
   [key: string]: unknown;
