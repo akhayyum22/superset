@@ -193,18 +193,22 @@ const MetricsControl = ({
   const onMetricEdit = useCallback(
     (changedMetric: Metric, oldMetric: Metric) => {
       const newValue = value.map(val => {
-        const typedVal = val as Extract<MetricOption, object> & {
-          optionName?: string;
-        };
-        const typedOldMetric = oldMetric as Metric & {
-          optionName?: string;
-        };
+        const optionName =
+          typeof val === 'object' && val !== null && 'optionName' in val
+            ? val.optionName
+            : undefined;
+        const oldMetricOptionName =
+          typeof oldMetric === 'object' &&
+          oldMetric !== null &&
+          'optionName' in oldMetric
+            ? oldMetric.optionName
+            : undefined;
         if (
           // compare saved metrics
           val === oldMetric.metric_name ||
           // compare adhoc metrics
-          typeof typedVal.optionName !== 'undefined'
-            ? typedVal.optionName === typedOldMetric.optionName
+          typeof optionName !== 'undefined'
+            ? optionName === oldMetricOptionName
             : false
         ) {
           return changedMetric;
