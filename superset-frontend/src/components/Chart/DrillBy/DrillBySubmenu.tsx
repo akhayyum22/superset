@@ -39,6 +39,7 @@ import { css, useTheme } from '@apache-superset/core/theme';
 import {
   Constants,
   Input,
+  type InputRef,
   Loading,
   Popover,
   Icons,
@@ -46,7 +47,6 @@ import {
 import { Radio } from '@superset-ui/core/components/Radio';
 import { debounce } from 'lodash-es';
 import { List, type RowComponentProps } from 'react-window';
-import { InputRef } from 'antd';
 import { MenuItemTooltip } from '../DisabledMenuItemTooltip';
 import { VirtualizedMenuItem } from '../MenuItemWithTruncation';
 import { Dataset } from '../types';

@@ -20,14 +20,17 @@
 import { ReactNode, CSSProperties, useCallback } from 'react';
 import { truncationCSS, useCSSTextTruncation } from '@superset-ui/core';
 import { css, useTheme } from '@apache-superset/core/theme';
-import { Menu, type ItemType } from '@superset-ui/core/components/Menu';
+import {
+  Menu,
+  type ItemType,
+  type MenuItemType,
+} from '@superset-ui/core/components/Menu';
 import { Flex, Tooltip } from '@superset-ui/core/components';
-import { MenuItemProps } from 'antd';
 
 export type MenuItemWithTruncationProps = {
   tooltipText: ReactNode;
   children: ReactNode;
-  onClick?: MenuItemProps['onClick'];
+  onClick?: MenuItemType['onClick'];
   style?: CSSProperties;
   menuKey?: string;
 };
