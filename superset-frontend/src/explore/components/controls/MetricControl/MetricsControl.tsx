@@ -18,6 +18,7 @@
  */
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ensureIsArray, usePrevious } from '@superset-ui/core';
+import type { Metric } from '@superset-ui/core';
 import { t } from '@apache-superset/core/translation';
 import { isEqual } from 'lodash-es';
 import ControlHeader from 'src/explore/components/ControlHeader';
@@ -31,13 +32,23 @@ import {
 import MetricDefinitionValue from './MetricDefinitionValue';
 import AdhocMetric, { dedupeAdhocMetricOptionName } from './AdhocMetric';
 import AdhocMetricPopoverTrigger from './AdhocMetricPopoverTrigger';
+import { savedMetricType } from './types';
+import type { Datasource } from 'src/explore/types';
+import type { ISaveableDatasource } from 'src/SqlLab/components/SaveDatasetModal';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MetricColumn = { column_name: string; type: string };
+type MetricDefinitionOption = AdhocMetric | savedMetricType | string;
+type MetricOption = MetricDefinitionOption | Metric;
+type AdhocMetricDefinition = ConstructorParameters<typeof AdhocMetric>[0] & {
+  expressionType: string;
+};
+type MetricInput = MetricOption | AdhocMetricDefinition;
+
 function getOptionsForSavedMetrics(
-  savedMetrics: any,
-  currentMetricValues: any,
-  currentMetric: any,
-) {
+  savedMetrics: savedMetricType[],
+  currentMetricValues: MetricInput | MetricInput[] | null | undefined,
+  currentMetric: MetricOption | null,
+): savedMetricType[] {
   return (
     savedMetrics?.filter((savedMetric: { metric_name: string }) =>
       Array.isArray(currentMetricValues)
@@ -48,29 +59,31 @@ function getOptionsForSavedMetrics(
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isDictionaryForAdhocMetric(value: any) {
-  return value && !(value instanceof AdhocMetric) && value.expressionType;
+function isDictionaryForAdhocMetric(
+  value: unknown,
+): value is AdhocMetricDefinition {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !(value instanceof AdhocMetric) &&
+    'expressionType' in value &&
+    Boolean(value.expressionType)
+  );
 }
 
 // adhoc metrics are stored as dictionaries in URL params. We convert them back into the
 // AdhocMetric class for typechecking, consistency and instance method access.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function coerceAdhocMetrics(value: any) {
+function coerceAdhocMetrics(
+  value: MetricInput | MetricInput[] | null | undefined,
+): MetricOption[] {
   if (!value) {
     return [];
   }
-  if (!Array.isArray(value)) {
-    if (isDictionaryForAdhocMetric(value)) {
-      return [new AdhocMetric(value)];
-    }
-    return [value];
-  }
+  const values: MetricInput[] = Array.isArray(value) ? value : [value];
   // Metrics are identified by optionName when editing; regenerate any that
   // collide so each keeps a unique identity (see dedupeAdhocMetricOptionName).
   const seenOptionNames = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return value.map((val: any) => {
+  return values.map(val => {
     if (isDictionaryForAdhocMetric(val)) {
       return dedupeAdhocMetricOptionName(new AdhocMetric(val), seenOptionNames);
     }
@@ -81,37 +94,55 @@ function coerceAdhocMetrics(value: any) {
 const emptySavedMetric = { metric_name: '', expression: '' };
 
 // TODO: use typeguards to distinguish saved metrics from adhoc metrics
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getMetricsMatchingCurrentDataset = (
-  value: any,
-  columns: any,
-  savedMetrics: any,
-) =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ensureIsArray(value).filter((metric: any) => {
-    if (typeof metric === 'string' || metric.metric_name) {
+  value: MetricInput | MetricInput[],
+  columns: MetricColumn[],
+  savedMetrics: savedMetricType[],
+): MetricInput[] => {
+  const metrics: MetricInput[] = Array.isArray(value) ? value : [value];
+  return metrics.filter(metric => {
+    if (
+      typeof metric === 'string' ||
+      (typeof metric === 'object' &&
+        metric !== null &&
+        'metric_name' in metric &&
+        typeof metric.metric_name === 'string')
+    ) {
       return savedMetrics?.some(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (savedMetric: any) =>
+        savedMetric =>
           savedMetric.metric_name === metric ||
-          savedMetric.metric_name === metric.metric_name,
+          (typeof metric !== 'string' &&
+            savedMetric.metric_name === metric.metric_name),
       );
     }
-    return columns?.some(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (column: any) =>
-        !metric.column || metric.column.column_name === column.column_name,
+    return (
+      'column' in metric &&
+      columns?.some(
+        column =>
+          !metric.column || metric.column.column_name === column.column_name,
+      )
     );
   });
+};
+
+function isMetricDefinitionOption(
+  option: MetricOption,
+): option is MetricDefinitionOption {
+  return (
+    typeof option === 'string' ||
+    option instanceof AdhocMetric ||
+    'expression' in option
+  );
+}
 
 export interface MetricsControlProps {
   name: string;
   onChange: (value: unknown) => void;
   multi?: boolean;
-  value?: unknown;
-  columns?: unknown[];
-  savedMetrics?: unknown[];
-  datasource?: unknown;
+  value?: MetricInput | MetricInput[];
+  columns?: MetricColumn[];
+  savedMetrics?: savedMetricType[];
+  datasource?: Datasource & ISaveableDatasource;
   clearable?: boolean;
   isLoading?: boolean;
   [key: string]: unknown;
@@ -131,8 +162,7 @@ const MetricsControl = ({
   const prevSavedMetrics = usePrevious(savedMetrics);
 
   const handleChange = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (opts: any) => {
+    (opts: MetricInput | MetricInput[] | null) => {
       // if clear out options
       if (opts === null) {
         onChange(null);
@@ -141,10 +171,13 @@ const MetricsControl = ({
 
       const transformedOpts = ensureIsArray(opts);
       const optionValues = transformedOpts
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((option: any) => {
+        .map(option => {
           // pre-defined metric
-          if (option.metric_name) {
+          if (
+            typeof option === 'object' &&
+            option !== null &&
+            'metric_name' in option
+          ) {
             return option.metric_name;
           }
           return option;
@@ -156,7 +189,7 @@ const MetricsControl = ({
   );
 
   const onNewMetric = useCallback(
-    (newMetric: unknown) => {
+    (newMetric: Metric) => {
       const newValue = [...value, newMetric];
       setValue(newValue);
       handleChange(newValue);
@@ -165,17 +198,19 @@ const MetricsControl = ({
   );
 
   const onMetricEdit = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (changedMetric: any, oldMetric: any) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const newValue = value.map((val: any) => {
+    (changedMetric: Metric, oldMetric: Metric) => {
+      const newValue = value.map(val => {
+        const isSameAdhocMetric =
+          typeof val === 'object' &&
+          val !== null &&
+          'optionName' in val &&
+          'optionName' in oldMetric &&
+          val.optionName === oldMetric.optionName;
         if (
           // compare saved metrics
           val === oldMetric.metric_name ||
           // compare adhoc metrics
-          typeof val.optionName !== 'undefined'
-            ? val.optionName === oldMetric.optionName
-            : false
+          isSameAdhocMetric
         ) {
           return changedMetric;
         }
@@ -232,12 +267,10 @@ const MetricsControl = ({
         <AdhocMetricPopoverTrigger
           adhocMetric={newAdhocMetric}
           onMetricEdit={onNewMetric}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          columns={columns as any}
+          columns={columns}
           savedMetricsOptions={savedMetricOptions}
           savedMetric={emptySavedMetric}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          datasource={datasource as any}
+          datasource={datasource!}
           isNew
         >
           {trigger}
@@ -283,30 +316,31 @@ const MetricsControl = ({
   );
 
   const valueRenderer = useCallback(
-    (option: unknown, index: number) => (
-      <MetricDefinitionValue
-        key={index}
-        index={index}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        option={option as any}
-        onMetricEdit={onMetricEdit}
-        onRemoveMetric={onRemoveMetric}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        columns={columns as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        datasource={datasource as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        savedMetrics={savedMetrics as any}
-        savedMetricsOptions={getOptionsForSavedMetrics(
-          savedMetrics,
-          value,
-          value?.[index],
-        )}
-        onMoveLabel={moveLabel}
-        onDropLabel={onDropLabel}
-        multi={multi}
-      />
-    ),
+    (option: MetricOption, index: number) => {
+      if (!isMetricDefinitionOption(option)) {
+        return null;
+      }
+      return (
+        <MetricDefinitionValue
+          key={index}
+          index={index}
+          option={option}
+          onMetricEdit={onMetricEdit}
+          onRemoveMetric={onRemoveMetric}
+          columns={columns}
+          datasource={datasource}
+          savedMetrics={savedMetrics}
+          savedMetricsOptions={getOptionsForSavedMetrics(
+            savedMetrics,
+            value,
+            value?.[index],
+          )}
+          onMoveLabel={moveLabel}
+          onDropLabel={onDropLabel}
+          multi={multi}
+        />
+      );
+    },
     [
       columns,
       datasource,
