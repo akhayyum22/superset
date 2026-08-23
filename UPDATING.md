@@ -24,6 +24,7 @@ assists people when migrating to a new version.
 
 ## Next
 
+- `npm audit --omit=dev` reports GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq against the transitive `image-size` package (`@loaders.gl/textures` -> `texture-compressor` -> `image-size`), and no `overrides` entry can clear them: both advisories cover every published release up to and including the latest, `2.0.2`. The advisories are therefore left in place instead of being taken through `npm audit fix --force`, which downgrades `@deck.gl/mesh-layers` to 8.9.36 and breaks the deck.gl chart plugins. `texture-compressor` is declared by `@loaders.gl/textures` but never imported by it, so the vulnerable ICNS/JXL/HEIF parsers are not reachable from the Superset bundle. This note can be dropped once `image-size` publishes a patched release, or once `@loaders.gl/textures` stops depending on `texture-compressor`.
 - `SAMPLES_ROW_LIMIT` is now the default for `/datasource/samples` requests without a valid explicit `per_page`, rather than a hard per-request ceiling; explicit limits are honored up to the existing global row-limit ceiling, matching `/chart/data` SAMPLES requests.
 
 ### MCP tool results preserve stored string values
