@@ -93,6 +93,8 @@ def scheduler(self: Task) -> None:  # pylint: disable=unused-argument
         datetime.fromisoformat(scheduler.request.expires)
         - current_app.config["CELERY_BEAT_SCHEDULER_EXPIRES"]
         if scheduler.request.expires
+        # Aware UTC: cron_schedule_window converts this to the schedule's
+        # local zone before picking fire times.
         else datetime.now(tz=timezone.utc)
     )
     for active_schedule in active_schedules:
@@ -136,7 +138,10 @@ def execute(
             elif eta is not None:
                 scheduled_dttm = eta
             else:
-                scheduled_dttm = datetime.now(tz=timezone.utc)
+                # Naive UTC, matching the values cron_schedule_window yields
+                # and the naive report_execution_log.scheduled_dttm column
+                # this is persisted into.
+                scheduled_dttm = datetime.now(timezone.utc).replace(tzinfo=None)
         logger.info(
             "Executing alert/report, task id: %s, scheduled_dttm: %s",
             task_id,
