@@ -267,7 +267,7 @@ const MetricsControl = ({
           columns={columns}
           savedMetricsOptions={savedMetricOptions}
           savedMetric={emptySavedMetric}
-          datasource={datasource!}
+          datasource={datasource}
           isNew
         >
           {trigger}
