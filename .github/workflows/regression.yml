@@ -1,0 +1,146 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+name: Remediation regression report
+
+# Posts a reproducible regression report on remediation pull requests, and lets a
+# reviewer re-run it on demand by commenting `/regression [preset]`.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+      preset:
+        description: Suite preset (quick, security, backend, frontend, all)
+        default: security
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: regression-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    # Only remediation PRs, or an explicit reviewer request.
+    if: >-
+      (github.event_name == 'pull_request' &&
+        (startsWith(github.event.pull_request.head.ref, 'devin/') ||
+         contains(github.event.pull_request.labels.*.name, 'devin-remediate'))) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request != null &&
+        startsWith(github.event.comment.body, '/regression')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Resolve target pull request
+        id: target
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.payload.pull_request?.number
+              ?? context.payload.issue?.number
+              ?? Number(context.payload.inputs.pr);
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo, pull_number: number,
+            });
+            let preset = 'security';
+            if (context.eventName === 'issue_comment') {
+              preset = (context.payload.comment.body.trim().split(/\s+/)[1] || 'security');
+              await github.rest.reactions.createForIssueComment({
+                ...context.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            } else if (context.eventName === 'workflow_dispatch') {
+              preset = context.payload.inputs.preset || 'security';
+            }
+            core.setOutput('number', String(number));
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('ref', pr.head.ref);
+            core.setOutput('preset', preset);
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install audit tooling
+        # ruff is pinned to the repository's version so lint/format results match CI.
+        run: |
+          pip install --upgrade pip pip-audit
+          pip install "$(grep -E '^ruff==' requirements/development.txt)"
+
+      - name: Run regression suites
+        id: run
+        run: |
+          python scripts/regression/superset_regression.py \
+            --preset "${{ steps.target.outputs.preset }}" \
+            --trigger "GitHub Actions (${{ github.event_name }})" \
+            --commit "${{ steps.target.outputs.sha }}" \
+            --json regression.json \
+            > regression-report.md
+          cat regression-report.md
+
+      - name: Comment the report (appending to run history)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- regression-report -->';
+            const number = Number('${{ steps.target.outputs.number }}');
+            const body = `${marker}\n${fs.readFileSync('regression-report.md', 'utf8')}`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (!existing) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: number, body,
+              });
+              return;
+            }
+            // Keep every previous run visible: carry old history rows forward.
+            const rowPattern = /^\| \d+ \| .* \|$/gm;
+            const history = (existing.body.match(rowPattern) || [])
+              .filter(row => !row.startsWith('| Run |'));
+            const rows = body.match(rowPattern) || [];
+            const merged = [...history, ...rows]
+              .map((row, i) => row.replace(/^\| \d+ \|/, `| ${i + 1} |`));
+            await github.rest.issues.updateComment({
+              ...context.repo,
+              comment_id: existing.id,
+              body: body.replace(rows.join('\n'), merged.join('\n')),
+            });
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-${{ steps.target.outputs.number }}
+          path: |
+            regression-report.md
+            regression.json
