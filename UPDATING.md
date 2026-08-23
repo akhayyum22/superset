@@ -24,6 +24,7 @@ assists people when migrating to a new version.
 
 ## Next
 
+- `superset-frontend/package.json` pins the whole `js-yaml` 4.x line to `>=4.3.1` through an `overrides` entry (`"js-yaml@^4.0.0": "^4.3.1"`), because transitive dependents such as `react-diff-viewer-continued` and `cosmiconfig` accept ranges that still allow the vulnerable 4.0.0-4.3.0 releases (GHSA-5p4m-2wfm-xmqj). The entry can be dropped once every dependent requires a patched version directly, and it supersedes the narrower `lerna` -> `js-yaml` override it replaces.
 - `SAMPLES_ROW_LIMIT` is now the default for `/datasource/samples` requests without a valid explicit `per_page`, rather than a hard per-request ceiling; explicit limits are honored up to the existing global row-limit ceiling, matching `/chart/data` SAMPLES requests.
 
 ### MCP tool results preserve stored string values

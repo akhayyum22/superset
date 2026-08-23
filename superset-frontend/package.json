@@ -408,10 +408,8 @@
     "jest-mock": "^30.4.0",
     "jest-runtime": "^30.4.0",
     "jest-util": "^30.4.0",
+    "js-yaml@^4.0.0": "^4.3.1",
     "jspdf": "^4.2.0",
-    "lerna": {
-      "js-yaml": "^4.3.0"
-    },
     "minimatch@>=10": {
       "brace-expansion": ">=5.0.8"
     },
